@@ -13,7 +13,7 @@ from email.utils import parsedate_to_datetime
 import json
 
 # --- 页面配置 ---
-st.set_page_config(page_title="量化猎手 Pro (Cloud)", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="量化猎手 Pro (云端版)", page_icon="🚀", layout="wide")
 
 # --- CSS 美化 ---
 st.markdown("""
@@ -22,34 +22,30 @@ st.markdown("""
     .news-tag { font-size: 11px; color: #fff; background-color: #ff4757; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
     .comment-tag { font-size: 11px; color: #fff; background-color: #ffa502; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
     .hot-tag { font-size: 11px; color: #fff; background-color: #ff6b81; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
+    /* 调整 Tab 字体 */
+    .stTabs [data-baseweb="tab"] { font-size: 16px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 量化猎手 (Cloud Edition)")
+st.title("🚀 量化猎手 (云端版)")
 st.caption("基于 Streamlit Cloud | 美国节点直连 | 智能舆情分析")
 
 # --- 1. 侧边栏 ---
 with st.sidebar:
     st.header("⚙️ 控制台")
     
-    # 尝试从 Streamlit Secrets 读取 API Key，如果没有则显示输入框
+    # 尝试从 Streamlit Secrets 读取 API Key
     default_key = st.secrets.get("GROQ_API_KEY", "")
     
     with st.expander("🔌 API 设置", expanded=not bool(default_key)):
-        # 云端不需要代理，默认留空
-        proxy_port = st.text_input("代理端口 (云端留空)", value="", help="本地运行填7897，云端部署请留空")
-        api_key = st.text_input("AI API Key", value=default_key, type="password")
+        api_key = st.text_input("AI API Key", value=default_key, type="password", help="请输入 Groq 或其他兼容 OpenAI 的 Key")
         api_base = st.text_input("AI Base URL", value="https://api.groq.com/openai/v1")
         model_name = st.text_input("模型名称", value="llama-3.3-70b-versatile")
 
     st.markdown("---")
-    ticker = st.text_input("股票代码", value="NVDA", help="推荐美股: NVDA, TSLA | 港股: 0700.HK")
+    ticker = st.text_input("股票代码", value="NVDA", help="推荐美股: NVDA, TSLA | 港股: 0700.HK | A股: 600519.SS")
     
-    # 构造代理 (仅当用户手动输入端口时生效)
-    PROXIES = None
-    if proxy_port:
-        proxy_url = f"http://127.0.0.1:{proxy_port}"
-        PROXIES = {"http": proxy_url, "https": proxy_url}
+    # 云端不需要代理设置，直接隐藏或移除
     
     # 指标参数
     with st.expander("🛠️ 指标参数"):
@@ -60,9 +56,9 @@ with st.sidebar:
     if st.button("🚀 立即分析", type="primary"):
         st.rerun()
 
-# --- 2. 核心逻辑 (保持 V3.1 的精华) ---
+# --- 2. 核心逻辑 ---
 
-# ... 指标计算函数 (保持不变) ...
+# ... 指标计算函数 ...
 def calculate_tech_indicators(df):
     if df.empty: return df
     df['MA_Short'] = df['Close'].rolling(window=int(ma_short)).mean()
@@ -103,8 +99,8 @@ def calculate_tech_indicators(df):
     df['OBV'] = np.cumsum(obv_change)
     return df
 
-# ... 东方财富评论抓取 (V3版直连) ...
-def get_eastmoney_comments_v3(ticker_symbol):
+# ... 东方财富评论抓取 (云端版：尝试直连 API，失败则网页) ...
+def get_eastmoney_comments_cloud(ticker_symbol):
     east_code = ""
     try:
         if ticker_symbol.endswith(".SS") or ticker_symbol.endswith(".SZ"):
@@ -114,40 +110,83 @@ def get_eastmoney_comments_v3(ticker_symbol):
             east_code = "hk" + raw_code.zfill(5) 
         else:
             east_code = "us" + ticker_symbol
+            
+        # 优先尝试 HTML 抓取 (通常内容更全)
         url = f"http://guba.eastmoney.com/list,{east_code}.html"
         headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" }
-        # 云端不需要代理，直接访问
         resp = requests.get(url, headers=headers, timeout=6)
         resp.encoding = 'utf-8'
         soup = BeautifulSoup(resp.text, 'lxml')
+        
         comments = []
         items = soup.select(".article-h .l3 a")
         if not items: items = soup.select(".listitem .title a")
+        
         for item in items[:10]:
             title = item.get('title') or item.text.strip()
             href = item.get('href')
             if not title or "公告" in title: continue
             if not href.startswith("http"): href = "http://guba.eastmoney.com" + href
             comments.append({'title': title, 'link': href})
+            
         return comments
     except: return []
 
-# ... 热榜逻辑 (API 兜底版) ...
-def get_eastmoney_all_hot_fallback():
+# ... 全站热榜 (云端修复版：API 优先) ...
+def get_eastmoney_all_hot_cloud():
     hot_list = []
+    # 模拟手机 User-Agent
     headers = { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1" }
     
-    # 优先 API (最稳)
+    # === 策略更改：优先使用 API ===
+    # 原因：Streamlit 服务器在美国，直接抓取东方财富 HTML 网页极易被识别为爬虫并返回空白/验证码。
+    # API 返回的是纯 JSON 数据，对 IP 限制通常较宽。
     try:
+        # 东方财富个股人气榜 API
         api_url = "https://emappdata.eastmoney.com/stock/rank/get_hot_stock_list"
-        payload = { "appId": "appId01", "globalId": "786826352926379447", "marketType": "", "pageNo": 1, "pageSize": 10 }
+        payload = {
+            "appId": "appId01", 
+            "globalId": "786826352926379447", 
+            "marketType": "", 
+            "pageNo": 1, 
+            "pageSize": 12
+        }
+        # POST 请求
         resp = requests.post(api_url, json=payload, headers=headers, timeout=5)
         data = resp.json()
+        
         if 'data' in data:
             for item in data['data']:
-                hot_list.append({ 'title': f"🔥 {item.get('name')} (人气榜)", 'link': f"http://guba.eastmoney.com/list,{item.get('code')}.html" })
-    except: pass
-    return hot_list
+                name = item.get('name')
+                code = item.get('code')
+                # 构造链接
+                link = f"http://guba.eastmoney.com/list,{code}.html"
+                hot_list.append({
+                    'title': f"🔥 {name} (全网人气飙升)", 
+                    'link': link
+                })
+    except Exception as e:
+        print(f"API Failed: {e}")
+
+    # 如果 API 失败，才尝试备用的网页抓取 (虽然在云端概率较低)
+    if not hot_list:
+        try:
+            url = "http://mguba.eastmoney.com/"
+            resp = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(resp.text, 'lxml')
+            items = soup.find_all('a')
+            for item in items:
+                title = item.text.strip()
+                link = item.get('href')
+                if len(title) < 4 or not link: continue
+                if "注册" in title or "下载" in title: continue
+                if not link.startswith("http"): link = "http://mguba.eastmoney.com" + link
+                if any(h['title'] == title for h in hot_list): continue
+                hot_list.append({'title': title, 'link': link})
+                if len(hot_list) >= 10: break
+        except: pass
+        
+    return hot_list[:10]
 
 # ... 整合数据获取 ...
 def get_stock_data_full(ticker_symbol):
@@ -161,11 +200,11 @@ def get_stock_data_full(ticker_symbol):
     seven_days_ago = datetime.now() - timedelta(days=7)
     
     def get_google_news(query):
-        # 注意：云端不需要 when:7d 也可以，但加上更准。
-        # 重点：proxies=PROXIES 只有在 PROXIES 有值时才生效
-        rss_url = f"https://news.google.com/rss/search?q={query}+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+        # 强制中文搜索
+        rss_url = f"https://news.google.com/rss/search?q={query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
         try:
-            resp = requests.get(rss_url, headers={"User-Agent": "Mozilla/5.0"}, proxies=PROXIES, timeout=10)
+            # 云端不需要代理
+            resp = requests.get(rss_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             soup = BeautifulSoup(resp.content, features="xml")
             items = soup.findAll('item')
             clean = []
@@ -191,8 +230,8 @@ def get_stock_data_full(ticker_symbol):
                     news_list.append({'title': n.get('title'), 'link': n.get('link'), 'pubDate': datetime.fromtimestamp(ts).strftime('%Y-%m-%d'), 'dt': datetime.fromtimestamp(ts), 'source_type': 'yahoo'})
         except: pass
     
-    comments = get_eastmoney_comments_v3(ticker_symbol)
-    hot_list = get_eastmoney_all_hot_fallback()
+    comments = get_eastmoney_comments_cloud(ticker_symbol)
+    hot_list = get_eastmoney_all_hot_cloud()
     
     return hist_df, info, news_list[:10], comments, hot_list
 
@@ -212,25 +251,27 @@ def render_valuation_bar(current, history):
     </div>
     """, unsafe_allow_html=True)
 
-# ... 绘图 (保持不变，省略部分重复代码以节省篇幅，直接复用之前的 plot_advanced_charts) ...
+# ... 绘图 (带中文标题) ...
 def plot_advanced_charts(df, ticker, secondary_indicator):
     plot_df = df.tail(250)
-    # 简单实现绘图，确保云端运行正常
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=[f'{ticker} Price', 'Volume', secondary_indicator])
-    fig.add_trace(go.Candlestick(x=plot_df.index, open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='K'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Short'], name='MA5'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Long'], name='MA20'), row=1, col=1)
-    fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['Volume'], name='Vol'), row=2, col=1)
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], 
+                        subplot_titles=[f'{ticker} 股价趋势', '成交量', secondary_indicator])
+    
+    fig.add_trace(go.Candlestick(x=plot_df.index, open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='K线'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Short'], name=f'MA{int(ma_short)}'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Long'], name=f'MA{int(ma_long)}'), row=1, col=1)
+    fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['Volume'], name='成交量'), row=2, col=1)
     
     if secondary_indicator == "MACD":
-        fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD'), row=3, col=1)
+        fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD柱'), row=3, col=1)
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['DIF'], name='DIF'), row=3, col=1)
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['DEA'], name='DEA'), row=3, col=1)
     elif secondary_indicator == "OBV":
-        fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['OBV'], name='OBV'), row=3, col=1)
+        fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['OBV'], name='OBV能量潮'), row=3, col=1)
     elif secondary_indicator == "RSI":
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI'], name='RSI'), row=3, col=1)
-        fig.add_hline(y=70, row=3, col=1); fig.add_hline(y=30, row=3, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
     elif secondary_indicator == "KDJ":
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['K'], name='K'), row=3, col=1)
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['D'], name='D'), row=3, col=1)
@@ -238,15 +279,16 @@ def plot_advanced_charts(df, ticker, secondary_indicator):
     elif secondary_indicator == "CCI":
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['CCI'], name='CCI'), row=3, col=1)
 
-    fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_white")
+    fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_white", hovermode="x unified")
     return fig
 
 # --- 主程序 ---
-with st.spinner("☁️ 正在连接美国服务器获取全球数据..."):
+with st.spinner("☁️ 正在连接全球金融节点获取数据..."):
     try:
         raw_df, info, news, comments, hot_list = get_stock_data_full(ticker)
     except Exception as e:
-        st.error(f"Error: {e}"); st.stop()
+        st.error(f"数据获取失败: {e}")
+        st.stop()
 
 if not raw_df.empty:
     df = calculate_tech_indicators(raw_df)
@@ -255,9 +297,9 @@ if not raw_df.empty:
     with st.container():
         c1, c2, c3, c4, c5 = st.columns([1.5, 1, 1, 1, 1.5])
         c1.metric(f"{info.get('longName', ticker)}", f"{last['Close']:.2f}")
-        c2.metric("PE", f"{safe_float(info.get('trailingPE'))}")
-        c3.metric("PB", safe_float(info.get('priceToBook')))
-        c4.metric("Div", format_percent(info.get('dividendYield')))
+        c2.metric("市盈率 PE", f"{safe_float(info.get('trailingPE'))}")
+        c3.metric("市净率 PB", safe_float(info.get('priceToBook')))
+        c4.metric("股息率 Div", format_percent(info.get('dividendYield')))
         with c5: render_valuation_bar(last['Close'], df['Close'])
 
     st.divider()
@@ -265,26 +307,61 @@ if not raw_df.empty:
     # Chart
     col_sel, _ = st.columns([1, 4])
     with col_sel:
-        opt = st.selectbox("Indicator", ["MACD", "KDJ", "RSI", "CCI", "OBV"], label_visibility="collapsed")
+        opt = st.selectbox("选择副图指标", ["MACD", "KDJ", "RSI", "CCI", "OBV"], label_visibility="collapsed")
     st.plotly_chart(plot_advanced_charts(df, ticker, opt), use_container_width=True)
     
     # Tabs
-    t1, t2, t3, t4 = st.tabs(["🤖 AI Report", "📰 News", "💬 Comments", "🔥 Hot"])
+    t1, t2, t3, t4 = st.tabs(["🤖 AI 研报", "📰 新闻资讯", "💬 股吧热评", "🔥 全网热榜"])
     
     with t1:
-        if st.button("Generate Report", type="primary"):
-            if not api_key: st.error("No API Key")
+        if st.button("生成深度分析报告", type="primary"):
+            if not api_key: st.error("请先在左侧配置 API Key")
             else:
-                prompt = f"Analyze {ticker}. Close:{last['Close']:.2f}, RSI:{last['RSI']:.2f}. News:{str([n['title'] for n in news[:3]])}. Comments:{str([c['title'] for c in comments[:5]])}. Give investment advice."
+                prompt = f"""
+                请作为一位资深的华尔街与A股双栖基金经理，分析股票 {ticker}。
+                
+                【技术面数据】
+                最新价: {last['Close']:.2f}
+                RSI指标: {last['RSI']:.2f} (强弱参考)
+                
+                【基本面数据】
+                PE市盈率: {safe_float(info.get('trailingPE'))}
+                PB市净率: {safe_float(info.get('priceToBook'))}
+                
+                【舆情面】
+                最新新闻: {str([n['title'] for n in news[:3]])}
+                散户热评: {str([c['title'] for c in comments[:5]])}
+                
+                请用**中文**生成一份简报：
+                1. **多空博弈分析**：机构观点与散户情绪是否对立？
+                2. **技术形态诊断**：是否存在背离或买卖信号？
+                3. **操作建议**：激进型与稳健型投资者的策略。
+                """
                 client = OpenAI(api_key=api_key, base_url=api_base)
-                resp = client.chat.completions.create(model=model_name, messages=[{"role":"user","content":prompt}])
-                st.info(resp.choices[0].message.content)
+                with st.spinner("AI 正在撰写中文研报..."):
+                    resp = client.chat.completions.create(model=model_name, messages=[{"role":"user","content":prompt}])
+                    st.info(resp.choices[0].message.content)
 
     with t2:
-        for n in news: st.markdown(f"[{n['title']}]({n['link']})"); st.divider()
+        for n in news: 
+            st.markdown(f"[{n['title']}]({n['link']})")
+            st.caption(f"来源: {n.get('source_type', 'Web')} | 时间: {n.get('pubDate', '')}")
+            st.divider()
     with t3:
-        for c in comments: st.markdown(f"[{c['title']}]({c['link']})"); st.divider()
+        if comments:
+            for c in comments: st.markdown(f"[{c['title']}]({c['link']})"); st.divider()
+        else: st.info("暂无评论数据")
     with t4:
-        for h in hot_list: st.markdown(f"[{h['title']}]({h['link']})"); st.divider()
+        if hot_list:
+            st.caption("来源：东方财富全网人气榜 (API直连)")
+            for i, h in enumerate(hot_list):
+                st.markdown(f"""
+                <div style="margin-bottom: 8px;">
+                    <span class="hot-tag">TOP {i+1}</span>
+                    <a href="{h.get('link')}" target="_blank" style="text-decoration:none; color:#333; font-weight:bold;">{h.get('title')}</a>
+                </div>
+                """, unsafe_allow_html=True)
+                st.divider()
+        else: st.info("热榜数据获取超时，可能受云端网络限制。")
 
-else: st.warning("Waiting for input...")
+else: st.warning("请在左侧输入股票代码并点击运行。")
