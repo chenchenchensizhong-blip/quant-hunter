@@ -13,7 +13,7 @@ from email.utils import parsedate_to_datetime
 import json
 
 # --- 页面配置 ---
-st.set_page_config(page_title="量化猎手 V5.0 (基本面深钻版)", page_icon="💎", layout="wide")
+st.set_page_config(page_title="量化猎手 V5.1 (双核驱动版)", page_icon="⚔️", layout="wide")
 
 st.markdown("""
 <style>
@@ -21,14 +21,13 @@ st.markdown("""
     .news-tag { font-size: 11px; color: #fff; background-color: #ff4757; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
     .comment-tag { font-size: 11px; color: #fff; background-color: #ffa502; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
     .hot-tag { font-size: 11px; color: #fff; background-color: #ff6b81; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
-    /* 紧凑型 Metric */
     div[data-testid="stMetricValue"] { font-size: 18px; }
     div[data-testid="stMetricLabel"] { font-size: 12px; color: #666; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💎 量化猎手 V5.0 (基本面深钻版)")
-st.caption("Streamlit Cloud | 20+ 财务维度 | 机构目标价 | AI 杜邦分析")
+st.title("⚔️ 量化猎手 V5.1 (双核驱动版)")
+st.caption("Streamlit Cloud | 深度基本面 + 全维技术面 | AI 综合决策")
 
 # --- 1. 侧边栏 ---
 with st.sidebar:
@@ -50,7 +49,7 @@ with st.sidebar:
     if st.button("🚀 深度扫描", type="primary"):
         st.rerun()
 
-# --- 2. 核心逻辑 ---
+# --- 2. 核心逻辑 (保持不变) ---
 
 def calculate_tech_indicators(df):
     if df.empty: return df
@@ -92,9 +91,7 @@ def calculate_tech_indicators(df):
     df['OBV'] = np.cumsum(obv_change)
     return df
 
-# --- 数据获取模块 ---
 def get_eastmoney_comments_cloud(ticker_symbol):
-    """ 获取股吧评论 (HTML直连) """
     east_code = ""
     try:
         if ticker_symbol.endswith(".SS") or ticker_symbol.endswith(".SZ"):
@@ -122,7 +119,6 @@ def get_eastmoney_comments_cloud(ticker_symbol):
     except: return []
 
 def get_eastmoney_all_hot_cloud():
-    """ 获取全站热榜 (API优先) """
     hot_list = []
     headers = { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1" }
     try:
@@ -134,6 +130,23 @@ def get_eastmoney_all_hot_cloud():
             for item in data['data']:
                 hot_list.append({ 'title': f"🔥 {item.get('name')} (全网人气飙升)", 'link': f"http://guba.eastmoney.com/list,{item.get('code')}.html" })
     except: pass
+    
+    if not hot_list:
+        try:
+            url = "http://mguba.eastmoney.com/"
+            resp = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(resp.text, 'lxml')
+            items = soup.find_all('a')
+            for item in items:
+                title = item.text.strip()
+                link = item.get('href')
+                if len(title) < 4 or not link: continue
+                if "注册" in title or "下载" in title: continue
+                if not link.startswith("http"): link = "http://mguba.eastmoney.com" + link
+                if any(h['title'] == title for h in hot_list): continue
+                hot_list.append({'title': title, 'link': link})
+                if len(hot_list) >= 10: break
+        except: pass
     return hot_list[:10]
 
 def get_stock_data_full(ticker_symbol):
@@ -142,7 +155,6 @@ def get_stock_data_full(ticker_symbol):
     try: info = stock.info
     except: info = {}
     
-    # Google News
     news_list = []
     seven_days_ago = datetime.now() - timedelta(days=7)
     try:
@@ -162,7 +174,6 @@ def get_stock_data_full(ticker_symbol):
     hot_list = get_eastmoney_all_hot_cloud()
     return hist_df, info, news_list[:10], comments, hot_list
 
-# --- 辅助函数 ---
 def safe_float(val): return f"{val:.2f}" if val and isinstance(val, (int, float)) else "-"
 def format_percent(num): return f"{num * 100:.2f}%" if num and isinstance(num, (int, float)) else "-"
 def format_large(num):
@@ -171,7 +182,6 @@ def format_large(num):
     if num > 1e9: return f"{num/1e9:.2f}B"
     if num > 1e6: return f"{num/1e6:.2f}M"
     return str(num)
-
 def calculate_percentile(current_val, history_series): return (history_series < current_val).mean() * 100 if not history_series.empty else 0
 
 def render_valuation_bar(current, history):
@@ -185,29 +195,28 @@ def render_valuation_bar(current, history):
     </div>
     """, unsafe_allow_html=True)
 
-# ... 绘图 (保持精简) ...
 def plot_advanced_charts(df, ticker, secondary_indicator):
     plot_df = df.tail(250)
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], 
                         subplot_titles=[f'{ticker} 价格趋势', '成交量', secondary_indicator])
     fig.add_trace(go.Candlestick(x=plot_df.index, open=plot_df['Open'], high=plot_df['High'], low=plot_df['Low'], close=plot_df['Close'], name='K线'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Short'], name='MA5'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Long'], name='MA20'), row=1, col=1)
-    fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['Volume'], name='Vol'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Short'], name=f'MA{int(ma_short)}'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MA_Long'], name=f'MA{int(ma_long)}'), row=1, col=1)
+    fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['Volume'], name='成交量'), row=2, col=1)
     
     if secondary_indicator == "MACD":
-        fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD'), row=3, col=1)
+        fig.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD柱'), row=3, col=1)
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['DIF'], name='DIF'), row=3, col=1)
         fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['DEA'], name='DEA'), row=3, col=1)
     elif secondary_indicator == "OBV": fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['OBV'], name='OBV'), row=3, col=1)
     elif secondary_indicator == "RSI": fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI'], name='RSI'), row=3, col=1); fig.add_hline(y=70, row=3, col=1); fig.add_hline(y=30, row=3, col=1)
     elif secondary_indicator == "KDJ": fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['K'], name='K'), row=3, col=1); fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['D'], name='D'), row=3, col=1); fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['J'], name='J'), row=3, col=1)
     elif secondary_indicator == "CCI": fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df['CCI'], name='CCI'), row=3, col=1)
-    fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_white")
+    fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_white", hovermode="x unified")
     return fig
 
 # --- 主程序 ---
-with st.spinner("💎 正在挖掘深度财务数据..."):
+with st.spinner("💎 正在进行双核数据扫描..."):
     try:
         raw_df, info, news, comments, hot_list = get_stock_data_full(ticker)
     except Exception as e:
@@ -233,82 +242,93 @@ if not raw_df.empty:
     with col_sel: opt = st.selectbox("副图指标", ["MACD", "KDJ", "RSI", "CCI", "OBV"], label_visibility="collapsed")
     st.plotly_chart(plot_advanced_charts(df, ticker, opt), use_container_width=True)
     
-    # === 深度基本面数据 (20+ 维度) ===
-    with st.expander("📊 深度财务透视 (Valuation / Growth / Cash / Debt)", expanded=True):
+    # === 深度基本面数据 ===
+    with st.expander("📊 深度财务透视 (Valuation / Growth / Cash / Debt)", expanded=False):
         t_fund1, t_fund2, t_fund3, t_fund4 = st.tabs(["💰 估值与回报", "🚀 成长与盈利", "🛡️ 负债与现金流", "📅 股息与机构"])
-        
-        with t_fund1: # 估值
+        with t_fund1:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("企业价值/EBITDA", safe_float(info.get('enterpriseToEbitda')), help="比PE更纯粹的估值指标，排除债务影响")
-            c2.metric("市销率 (P/S)", safe_float(info.get('priceToSalesTrailing12Months')), help="适合亏损但有营收的成长股")
+            c1.metric("企业价值/EBITDA", safe_float(info.get('enterpriseToEbitda')), help="比PE更纯粹的估值指标")
+            c2.metric("市销率 (P/S)", safe_float(info.get('priceToSalesTrailing12Months')))
             c3.metric("PEG Ratio", safe_float(info.get('pegRatio')), help="<1 通常视为低估")
-            c4.metric("ROE (净资产收益率)", format_percent(info.get('returnOnEquity')), help="巴菲特核心指标")
-            
-        with t_fund2: # 成长
+            c4.metric("ROE", format_percent(info.get('returnOnEquity')))
+        with t_fund2:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("季度营收增长 (YoY)", format_percent(info.get('revenueGrowth')))
-            c2.metric("季度盈利增长 (YoY)", format_percent(info.get('earningsGrowth')))
+            c1.metric("营收增长 (YoY)", format_percent(info.get('revenueGrowth')))
+            c2.metric("盈利增长 (YoY)", format_percent(info.get('earningsGrowth')))
             c3.metric("毛利率", format_percent(info.get('grossMargins')))
             c4.metric("净利率", format_percent(info.get('profitMargins')))
-            
-        with t_fund3: # 健康
+        with t_fund3:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("自由现金流 (FCF)", format_large(info.get('freeCashflow')), help="公司的真实印钞能力")
+            c1.metric("自由现金流", format_large(info.get('freeCashflow')))
             c2.metric("总现金", format_large(info.get('totalCash')))
             c3.metric("总负债", format_large(info.get('totalDebt')))
-            c4.metric("流动比率", safe_float(info.get('currentRatio')), help=">1.5 为健康，短期偿债能力")
-            
-        with t_fund4: # 股东
+            c4.metric("流动比率", safe_float(info.get('currentRatio')))
+        with t_fund4:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("股息率", format_percent(info.get('dividendYield')))
-            c2.metric("派息比率", format_percent(info.get('payoutRatio')), help="利润中多少分给了股东")
-            c3.metric("做空比例", format_percent(info.get('shortPercentOfFloat')), help="太高说明被机构看空")
+            c2.metric("派息比率", format_percent(info.get('payoutRatio')))
+            c3.metric("做空比例", format_percent(info.get('shortPercentOfFloat')))
             c4.metric("机构持仓", format_percent(info.get('heldPercentInstitutions')))
 
     # === AI 分析区 ===
     t1, t2, t3, t4 = st.tabs(["🤖 AI 深度投研", "📰 新闻资讯", "💬 股吧热评", "🔥 全网热榜"])
     
     with t1:
-        if st.button("生成 AI 深度分析报告", type="primary"):
+        if st.button("⚔️ 开启基本面+技术面双核分析", type="primary"):
             if not api_key: st.error("请先在左侧配置 API Key")
             else:
-                # 构造超级详细的 Prompt
+                # 1. 准备基本面数据
                 fund_str = f"""
-                估值: PE={safe_float(info.get('trailingPE'))}, PEG={safe_float(info.get('pegRatio'))}, PS={safe_float(info.get('priceToSalesTrailing12Months'))}
+                估值: PE={safe_float(info.get('trailingPE'))}, PEG={safe_float(info.get('pegRatio'))}, PB={safe_float(info.get('priceToBook'))}
                 盈利: ROE={format_percent(info.get('returnOnEquity'))}, 毛利率={format_percent(info.get('grossMargins'))}
                 成长: 营收增长={format_percent(info.get('revenueGrowth'))}, 盈利增长={format_percent(info.get('earningsGrowth'))}
-                现金流: FCF={format_large(info.get('freeCashflow'))}, 现金={format_large(info.get('totalCash'))}, 负债={format_large(info.get('totalDebt'))}
-                机构: 目标价={safe_float(info.get('targetMeanPrice'))}, 评级={info.get('recommendationKey')}
+                风险: 自由现金流={format_large(info.get('freeCashflow'))}, 负债={format_large(info.get('totalDebt'))}
+                机构预期: 目标价={safe_float(info.get('targetMeanPrice'))}, 评级={info.get('recommendationKey')}
                 """
                 
-                tech_str = f"Close:{last['Close']:.2f}, RSI:{last['RSI']:.2f}, MA20:{last['MA_Long']:.2f}, OBV趋势:{'上升' if last['OBV']>df.iloc[-5]['OBV'] else '下降'}"
+                # 2. 准备技术面数据 (增加 MA状态, MACD交叉, BOLL位置)
+                ma_state = "多头排列" if last['MA_Short'] > last['MA_Long'] else "空头排列"
+                macd_state = "红柱增强" if last['MACD_Hist'] > 0 and last['MACD_Hist'] > df.iloc[-2]['MACD_Hist'] else "动能减弱"
+                boll_pos = "触及上轨" if last['Close'] >= last['BOLL_Upper'] else "触及下轨" if last['Close'] <= last['BOLL_Lower'] else "中轨震荡"
                 
+                tech_str = f"""
+                趋势: 当前价={last['Close']:.2f}, MA5={last['MA_Short']:.2f}, MA20={last['MA_Long']:.2f} ({ma_state})
+                动能: RSI={last['RSI']:.2f}, MACD={last['MACD_Hist']:.2f} ({macd_state}), KDJ (K:{last['K']:.1f}/D:{last['D']:.1f})
+                波动: BOLL状态={boll_pos}, CCI={last['CCI']:.2f}
+                资金: OBV趋势={'上升' if last['OBV']>df.iloc[-5]['OBV'] else '下降'}
+                """
+                
+                # 3. 准备舆情
                 news_summary = str([n['title'] for n in news[:3]])
                 
+                # 4. 构造 Prompt
                 prompt = f"""
-                你是一位华尔街顶级基金经理。请基于以下全维度数据，对 {info.get('longName', ticker)} 进行深度投资价值分析。
+                你是一位掌管百亿资金的基金经理。请基于以下【基本面+技术面】全维数据，对 {info.get('longName', ticker)} 进行深度决策分析。
                 
-                【硬核财务数据】
+                【A. 基本面体检 (Fundamental)】
                 {fund_str}
                 
-                【技术面信号】
+                【B. 技术面扫描 (Technical)】
                 {tech_str}
                 
-                【近期舆情】
+                【C. 市场舆情 (Sentiment)】
                 {news_summary}
                 
-                请用**中文**生成一份严谨的研报，包含：
-                1. **杜邦分析视角**：公司的ROE是由高利润率驱动，还是高杠杆驱动？(结合毛利率和负债分析)
-                2. **安全边际**：当前估值(PE/PEG)配合现金流情况，股价是否便宜？
-                3. **风险预警**：是否存在增收不增利、现金流枯竭或债务过高等红灯信号？
-                4. **最终操作建议**：(买入/持有/卖出)及理由。
+                请用**中文**生成一份逻辑严密的研报，必须包含以下章节：
+                
+                1. **基本面护城河**：杜邦分析视角，公司盈利质量如何？估值是否具备安全边际？(重点关注PE/PEG与现金流)
+                2. **技术面择时**：当前是底部吸筹、中继拉升还是顶部派发？(结合MA均线与MACD/RSI动能分析，判断支撑与压力)
+                3. **多空共振分析**：基本面（好/坏）与技术面（涨/跌）是否一致？如果背离（如业绩好但股价跌），是黄金坑还是陷阱？
+                4. **最终交易策略**：
+                   - **激进型**：入场点位与止损位建议。
+                   - **稳健型**：仓位控制与定投建议。
                 """
                 
                 client = OpenAI(api_key=api_key, base_url=api_base)
-                with st.spinner("AI 正在进行杜邦分析与风险测算..."):
+                with st.spinner("AI 正在结合K线形态与财报数据..."):
                     resp = client.chat.completions.create(model=model_name, messages=[{"role":"user","content":prompt}])
                     st.markdown(f"""
-                    <div style='background-color:#f8f9fa; padding:20px; border-radius:10px; border-left: 5px solid #4b7bec;'>
+                    <div style='background-color:#f8f9fa; padding:20px; border-radius:10px; border-left: 5px solid #4b7bec; color: #333;'>
                         {resp.choices[0].message.content}
                     </div>
                     """, unsafe_allow_html=True)
