@@ -3,7 +3,7 @@ yfinance
 plotly
 pandas
 numpy
-openai
+zhipuai
 requests
 beautifulsoup4
 lxml
