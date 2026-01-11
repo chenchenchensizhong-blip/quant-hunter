@@ -5,7 +5,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from openai import OpenAI
+from zhipuai import ZhipuAI  # <--- 1. 改用智谱库
 import os
 import requests
 from bs4 import BeautifulSoup
@@ -13,7 +13,7 @@ from email.utils import parsedate_to_datetime
 import json
 
 # --- 页面配置 ---
-st.set_page_config(page_title="量化猎手 V5.1 (双核驱动版)", page_icon="⚔️", layout="wide")
+st.set_page_config(page_title="量化猎手 V5.2 (智谱版)", page_icon="⚔️", layout="wide")
 
 st.markdown("""
 <style>
@@ -26,17 +26,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚔️ 量化猎手 V5.1 (双核驱动版)")
-st.caption("Streamlit Cloud | 深度基本面 + 全维技术面 | AI 综合决策")
+st.title("⚔️ 量化猎手 V5.2 (智谱版)")
+st.caption("Streamlit Cloud | 深度基本面 + 全维技术面 | GLM-4 决策")
 
 # --- 1. 侧边栏 ---
 with st.sidebar:
     st.header("⚙️ 控制台")
-    default_key = st.secrets.get("GROQ_API_KEY", "")
+    # <--- 2. 修改 Secrets 读取键名 (建议在 Secrets 里改为 ZHIPU_API_KEY)
+    default_key = st.secrets.get("ZHIPU_API_KEY", "")
+    
     with st.expander("🔌 API 设置", expanded=not bool(default_key)):
-        api_key = st.text_input("AI API Key", value=default_key, type="password")
-        api_base = st.text_input("AI Base URL", value="https://api.groq.com/openai/v1")
-        model_name = st.text_input("模型名称", value="llama-3.3-70b-versatile")
+        api_key = st.text_input("智谱 API Key", value=default_key, type="password", help="请前往 bigmodel.cn 获取 API Key")
+        # <--- 3. 移除 Base URL (智谱 SDK 不需要手动填)
+        # <--- 4. 修改默认模型为 glm-4-flash (免费/快) 或 glm-4-plus
+        model_name = st.text_input("模型名称", value="glm-4-flash", help="推荐: glm-4-flash (免费) 或 glm-4-plus")
 
     st.markdown("---")
     ticker = st.text_input("股票代码", value="NVDA", help="美股: NVDA | 港股: 0700.HK | A股: 600519.SS")
@@ -286,7 +289,7 @@ if not raw_df.empty:
                 机构预期: 目标价={safe_float(info.get('targetMeanPrice'))}, 评级={info.get('recommendationKey')}
                 """
                 
-                # 2. 准备技术面数据 (增加 MA状态, MACD交叉, BOLL位置)
+                # 2. 准备技术面数据
                 ma_state = "多头排列" if last['MA_Short'] > last['MA_Long'] else "空头排列"
                 macd_state = "红柱增强" if last['MACD_Hist'] > 0 and last['MACD_Hist'] > df.iloc[-2]['MACD_Hist'] else "动能减弱"
                 boll_pos = "触及上轨" if last['Close'] >= last['BOLL_Upper'] else "触及下轨" if last['Close'] <= last['BOLL_Lower'] else "中轨震荡"
@@ -324,9 +327,13 @@ if not raw_df.empty:
                    - **稳健型**：仓位控制与定投建议。
                 """
                 
-                client = OpenAI(api_key=api_key, base_url=api_base)
-                with st.spinner("AI 正在结合K线形态与财报数据..."):
-                    resp = client.chat.completions.create(model=model_name, messages=[{"role":"user","content":prompt}])
+                # <--- 5. 智谱 AI 调用逻辑 --->
+                client = ZhipuAI(api_key=api_key) # 不需要 base_url
+                with st.spinner("GLM-4 正在进行深度分析..."):
+                    resp = client.chat.completions.create(
+                        model=model_name, 
+                        messages=[{"role":"user","content":prompt}]
+                    )
                     st.markdown(f"""
                     <div style='background-color:#f8f9fa; padding:20px; border-radius:10px; border-left: 5px solid #4b7bec; color: #333;'>
                         {resp.choices[0].message.content}
